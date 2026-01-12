@@ -1,4 +1,4 @@
-const PERSONA_PROMPTS = {
+export const DEFAULT_PERSONA_PROMPTS = {
   'business-analyst': `You are acting as a Business Analyst. Focus on requirements gathering, stakeholder needs, process optimization, and business value. Use clear, non-technical language when possible and emphasize ROI and business outcomes.`,
   'architect': `You are acting as a Software Architect. Focus on system design, scalability, maintainability, and technical trade-offs. Consider patterns, principles (SOLID, DRY), and long-term implications of design decisions.`,
   'developer': `You are acting as a Software Developer. Focus on clean, working code with good practices. Be practical and implementation-focused. Consider edge cases and error handling.`,
@@ -12,7 +12,7 @@ Your designs are sophisticated, cohesive, and would be featured on Dribbble or B
   'product-manager': `You are acting as a Product Manager. Focus on user stories, feature prioritization, market fit, and balancing stakeholder needs. Think about MVP scope and iterative delivery.`,
 }
 
-const OUTPUT_TYPE_PROMPTS = {
+export const DEFAULT_OUTPUT_TYPE_PROMPTS = {
   'coding': `Provide clean, well-structured code. Include comments only where logic isn't self-evident. Use modern best practices for the relevant language/framework.`,
   'architecture': `Provide architectural diagrams (using ASCII or describe components clearly), explain component relationships, data flows, and justify design decisions.`,
   'business-analysis': `Provide structured analysis with clear sections: Problem Statement, Requirements, Acceptance Criteria, and Success Metrics.`,
@@ -66,21 +66,75 @@ TECHNICAL REQUIREMENTS:
 
 Create designs that would impress a client - polished, professional, and modern with REAL images.`,
   'documentation': `Provide clear, well-organized documentation. Use appropriate headings, code examples where helpful, and consider the target audience's technical level.`,
+  'diagram': `Create diagrams using Mermaid syntax. Supported diagram types:
+- flowchart (for process flows, activity diagrams, swimlanes)
+- sequenceDiagram (for interactions between systems/actors)
+- classDiagram (for class relationships)
+- stateDiagram-v2 (for state machines)
+- gantt (for timelines and schedules)
+- erDiagram (for entity relationships)
+
+IMPORTANT RULES:
+- Wrap the diagram in a \`\`\`mermaid code block
+- Use clear, descriptive labels for nodes
+- For swimlanes/activity diagrams, use flowchart with subgraphs for each role/lane
+- Keep node IDs short (A, B, C or descriptive like validatePO) but labels descriptive
+- Use decision diamonds {Decision?} for yes/no branches
+- Add comments with %% to explain complex logic
+- Use proper arrow types: --> for flow, -.-> for optional, ==> for emphasis
+
+Example swimlane/activity diagram structure:
+\`\`\`mermaid
+flowchart TB
+    subgraph Carrier["Carrier"]
+        A[Arrive at dock]
+    end
+    subgraph Clerk["Warehouse Clerk"]
+        B[Receive delivery note]
+        C{Validate PO?}
+        D[Assign dock door]
+    end
+    subgraph System["WMS System"]
+        E[Check PO validity]
+        F[Return result]
+    end
+    A --> B
+    B --> C
+    C -->|Check| E
+    E --> F
+    F -->|Valid| D
+    F -->|Invalid| G[Reject delivery]
+\`\`\`
+
+For complex processes, break into logical sections and use clear labeling.`,
 }
 
-export function enhancePrompt({ systemInstructions, persona, outputType, userPrompt }) {
+export function enhancePrompt({
+  systemInstructions,
+  persona,
+  outputType,
+  userPrompt,
+  customPersonaPrompts = {},
+  customOutputTypePrompts = {}
+}) {
   const parts = []
 
   if (systemInstructions?.trim()) {
     parts.push(systemInstructions.trim())
   }
 
-  if (persona && PERSONA_PROMPTS[persona]) {
-    parts.push(PERSONA_PROMPTS[persona])
+  if (persona) {
+    const personaPrompt = customPersonaPrompts[persona] ?? DEFAULT_PERSONA_PROMPTS[persona]
+    if (personaPrompt) {
+      parts.push(personaPrompt)
+    }
   }
 
-  if (outputType && OUTPUT_TYPE_PROMPTS[outputType]) {
-    parts.push(`Output Format Instructions:\n${OUTPUT_TYPE_PROMPTS[outputType]}`)
+  if (outputType) {
+    const outputPrompt = customOutputTypePrompts[outputType] ?? DEFAULT_OUTPUT_TYPE_PROMPTS[outputType]
+    if (outputPrompt) {
+      parts.push(`Output Format Instructions:\n${outputPrompt}`)
+    }
   }
 
   const systemMessage = parts.join('\n\n')
@@ -94,56 +148,78 @@ export function enhancePrompt({ systemInstructions, persona, outputType, userPro
 export function extractHtmlFromResponse(content) {
   if (!content) return null
 
-  // Pattern 1: Match HTML code blocks (most common - ```html ... ```)
-  const htmlBlockRegex = /```html\s*([\s\S]*?)```/gi
+  // Pattern 1: Match HTML code blocks with flexible language tag
+  // Handles: ```html, ``` html, ```HTML, ```htm, ```markup, ```xml
+  const htmlBlockRegex = /```\s*(?:html?|markup|xml)\s*\n?([\s\S]*?)```/gi
   const matches = [...content.matchAll(htmlBlockRegex)]
 
   if (matches.length > 0) {
     // Return the last HTML block (most likely the final/complete version)
-    return matches[matches.length - 1][1].trim()
+    const html = matches[matches.length - 1][1].trim()
+    if (html) return html
   }
 
-  // Pattern 2: Match generic code blocks that contain HTML (``` ... ```)
-  const codeBlockRegex = /```\s*([\s\S]*?)```/gi
+  // Pattern 2: Match generic code blocks that contain HTML-like content
+  const codeBlockRegex = /```\s*\n?([\s\S]*?)```/gi
   const codeMatches = [...content.matchAll(codeBlockRegex)]
 
   for (const match of codeMatches) {
     const code = match[1].trim()
-    // Check if this code block contains HTML
-    if (code.includes('<!DOCTYPE') || code.includes('<html') || code.includes('<head') || code.includes('<body')) {
+    // Check if this code block contains HTML (more flexible check)
+    if (
+      code.includes('<!DOCTYPE') ||
+      code.includes('<html') ||
+      code.includes('<head') ||
+      code.includes('<body') ||
+      (code.includes('<div') && code.includes('<style')) ||
+      (code.includes('<div') && code.includes('class='))
+    ) {
       return code
     }
   }
 
-  // Pattern 3: DOCTYPE html (full document without code blocks)
+  // Pattern 3: Handle unclosed code blocks (model truncation or formatting issues)
+  // Match ```html or similar followed by content to end of string (greedy)
+  const unclosedBlockRegex = /```\s*(?:html?|markup|xml)\s*\n?([\s\S]+)$/i
+  const unclosedMatch = content.match(unclosedBlockRegex)
+  if (unclosedMatch) {
+    const code = unclosedMatch[1].trim()
+    // Verify it looks like HTML
+    if (code.includes('<!DOCTYPE') || code.includes('<html') || (code.includes('<div') && code.includes('<style'))) {
+      console.log('extractHtmlFromResponse: Matched unclosed code block, length:', code.length)
+      return code
+    }
+  }
+
+  // Pattern 4: DOCTYPE html (full document without code blocks)
   const htmlDocRegex = /<!DOCTYPE html>[\s\S]*<\/html>/i
   const docMatch = content.match(htmlDocRegex)
   if (docMatch) {
     return docMatch[0]
   }
 
-  // Pattern 4: <html> without DOCTYPE
+  // Pattern 5: <html> without DOCTYPE
   const htmlTagRegex = /<html[\s\S]*<\/html>/i
   const htmlMatch = content.match(htmlTagRegex)
   if (htmlMatch) {
     return htmlMatch[0]
   }
 
-  // Pattern 5: Just head and body (no html wrapper)
+  // Pattern 6: Just head and body (no html wrapper)
   const headBodyRegex = /<head[\s\S]*<\/head>[\s\S]*<body[\s\S]*<\/body>/i
   const headBodyMatch = content.match(headBodyRegex)
   if (headBodyMatch) {
     return `<!DOCTYPE html><html>${headBodyMatch[0]}</html>`
   }
 
-  // Pattern 6: Body content only (fallback for minimal responses)
+  // Pattern 7: Body content only (fallback for minimal responses)
   const bodyRegex = /<body[\s\S]*<\/body>/i
   const bodyMatch = content.match(bodyRegex)
   if (bodyMatch) {
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>${bodyMatch[0]}</html>`
   }
 
-  // Pattern 7: Look for any substantial HTML structure with divs
+  // Pattern 8: Look for any substantial HTML structure with divs
   const divStructureRegex = /<div[\s\S]*<\/div>/i
   const divMatch = content.match(divStructureRegex)
   if (divMatch && divMatch[0].length > 100) {
@@ -153,6 +229,52 @@ export function extractHtmlFromResponse(content) {
     const styles = styleMatches ? styleMatches.join('\n') : ''
 
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">${styles}</head><body>${divMatch[0]}</body></html>`
+  }
+
+  // Pattern 9: Look for style + any HTML elements (some models output styles first)
+  const styleFirstRegex = /(<style[\s\S]*?<\/style>[\s\S]*?)(<[a-z][\s\S]*>[\s\S]*<\/[a-z]+>)/i
+  const styleFirstMatch = content.match(styleFirstRegex)
+  if (styleFirstMatch) {
+    const styles = styleFirstMatch[1]
+    const htmlContent = styleFirstMatch[2]
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">${styles}</head><body>${htmlContent}</body></html>`
+  }
+
+  return null
+}
+
+export function extractMermaidFromResponse(content) {
+  if (!content) return null
+
+  // Pattern 1: Match ```mermaid code blocks
+  const mermaidBlockRegex = /```\s*mermaid\s*\n?([\s\S]*?)```/gi
+  const matches = [...content.matchAll(mermaidBlockRegex)]
+
+  if (matches.length > 0) {
+    // Return the last mermaid block (most likely the final/complete version)
+    const mermaid = matches[matches.length - 1][1].trim()
+    if (mermaid) return mermaid
+  }
+
+  // Pattern 2: Handle unclosed mermaid code blocks
+  const unclosedBlockRegex = /```\s*mermaid\s*\n?([\s\S]+)$/i
+  const unclosedMatch = content.match(unclosedBlockRegex)
+  if (unclosedMatch) {
+    const code = unclosedMatch[1].trim()
+    // Verify it looks like Mermaid (starts with a diagram type)
+    if (/^(flowchart|sequenceDiagram|classDiagram|stateDiagram|gantt|erDiagram|pie|graph)/i.test(code)) {
+      return code
+    }
+  }
+
+  // Pattern 3: Look for Mermaid content without code blocks (direct output)
+  const diagramTypes = ['flowchart', 'sequenceDiagram', 'classDiagram', 'stateDiagram-v2', 'stateDiagram', 'gantt', 'erDiagram', 'pie', 'graph']
+  for (const type of diagramTypes) {
+    const regex = new RegExp(`(${type}[\\s\\S]*?)(?=\`\`\`|$)`, 'i')
+    const match = content.match(regex)
+    if (match && match[1].trim().length > 20) {
+      return match[1].trim()
+    }
   }
 
   return null

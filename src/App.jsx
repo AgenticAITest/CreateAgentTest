@@ -4,9 +4,11 @@ import { useAIChat } from './hooks/useAIChat'
 import { useChatHistory } from './hooks/useChatHistory'
 import { useSavedPrompts } from './hooks/useSavedPrompts'
 import { useVisualEditor } from './hooks/useVisualEditor'
+import { useCustomPrompts } from './hooks/useCustomPrompts'
 import { SettingsModal } from './components/SettingsModal'
 import { TitlePromptModal } from './components/TitlePromptModal'
 import { SavePromptModal } from './components/SavePromptModal'
+import { PromptEditorModal } from './components/PromptEditorModal'
 import { ChatsList } from './components/ChatsList'
 import { SavedPromptsList } from './components/SavedPromptsList'
 import { SystemInstructions } from './components/SystemInstructions'
@@ -18,7 +20,11 @@ import { PreviewPane } from './components/PreviewPane'
 import { ResizableDivider } from './components/ResizableDivider'
 import { EditorToolbar } from './components/EditorToolbar'
 import { StylePanel } from './components/StylePanel'
+import { MermaidEditor } from './components/MermaidEditor'
+import { DiagramsNetEditor } from './components/DiagramsNetEditor'
 import { downloadHtmlFile, sanitizeFilename } from './utils/downloadUtils'
+import { providerSupportsImages } from './utils/apiClient'
+import { extractMermaidFromResponse } from './utils/promptEnhancer'
 
 function App() {
   // Settings modal state
@@ -33,6 +39,17 @@ function App() {
 
   // Style panel state
   const [isStylePanelOpen, setIsStylePanelOpen] = useState(false)
+
+  // Prompt editor modal state
+  const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false)
+
+  // Mermaid editor modal state
+  const [isMermaidEditorOpen, setIsMermaidEditorOpen] = useState(false)
+  const [editedMermaid, setEditedMermaid] = useState(null)
+
+  // diagrams.net editor modal state
+  const [isDiagramsNetEditorOpen, setIsDiagramsNetEditorOpen] = useState(false)
+  const [editedDiagramSvg, setEditedDiagramSvg] = useState(null)
 
   // Iframe ref for screenshot capture
   const iframeRef = useRef(null)
@@ -85,6 +102,24 @@ function App() {
     deletePrompt,
   } = useSavedPrompts()
 
+  // Custom prompts management
+  const {
+    customPersonas,
+    customOutputTypes,
+    getPersonaPrompt,
+    getOutputTypePrompt,
+    isPersonaCustomized,
+    isOutputTypeCustomized,
+    setPersonaPrompt,
+    setOutputTypePrompt,
+    resetPersona,
+    resetOutputType,
+    resetAllPrompts,
+  } = useCustomPrompts()
+
+  // Check if any customizations exist
+  const hasPromptCustomizations = Object.keys(customPersonas).length > 0 || Object.keys(customOutputTypes).length > 0
+
   // Chat state
   const {
     messages,
@@ -100,6 +135,8 @@ function App() {
     systemInstructions,
     persona,
     outputType,
+    customPersonaPrompts: customPersonas,
+    customOutputTypePrompts: customOutputTypes,
   })
 
   // Track previous message count to detect new messages
@@ -227,6 +264,39 @@ function App() {
   // Check if there's an assistant response to save
   const hasAssistantResponse = messages.some(m => m.role === 'assistant')
 
+  // Get original Mermaid code from messages
+  const getOriginalMermaid = useCallback(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg.role === 'assistant') {
+        const mermaid = extractMermaidFromResponse(msg.content)
+        if (mermaid) return mermaid
+      }
+    }
+    return null
+  }, [messages])
+
+  // Handle save edited Mermaid
+  const handleSaveMermaid = (code) => {
+    setEditedMermaid(code)
+  }
+
+  // Handle clear Mermaid edits
+  const handleClearMermaidEdits = () => {
+    setEditedMermaid(null)
+  }
+
+  // Handle save from diagrams.net
+  const handleSaveDiagramsNet = (xmlData) => {
+    setEditedDiagramSvg(xmlData)
+    setIsDiagramsNetEditorOpen(false)
+  }
+
+  // Handle clear diagrams.net edits
+  const handleClearDiagramsNetEdits = () => {
+    setEditedDiagramSvg(null)
+  }
+
   // Suggested title from first user message
   const suggestedTitle = pendingMessages?.[0]?.content?.slice(0, 50) || ''
 
@@ -291,6 +361,43 @@ function App() {
         onUpdateStyle={handleStyleUpdate}
       />
 
+      {/* Prompt Editor Modal */}
+      <PromptEditorModal
+        isOpen={isPromptEditorOpen}
+        onClose={() => setIsPromptEditorOpen(false)}
+        systemInstructions={systemInstructions}
+        persona={persona}
+        outputType={outputType}
+        customPersonas={customPersonas}
+        customOutputTypes={customOutputTypes}
+        getPersonaPrompt={getPersonaPrompt}
+        getOutputTypePrompt={getOutputTypePrompt}
+        isPersonaCustomized={isPersonaCustomized}
+        isOutputTypeCustomized={isOutputTypeCustomized}
+        setPersonaPrompt={setPersonaPrompt}
+        setOutputTypePrompt={setOutputTypePrompt}
+        resetPersona={resetPersona}
+        resetOutputType={resetOutputType}
+        resetAllPrompts={resetAllPrompts}
+      />
+
+      {/* Mermaid Editor Modal */}
+      <MermaidEditor
+        isOpen={isMermaidEditorOpen}
+        onClose={() => setIsMermaidEditorOpen(false)}
+        mermaidCode={editedMermaid || getOriginalMermaid()}
+        onSave={handleSaveMermaid}
+      />
+
+      {/* diagrams.net Editor Modal */}
+      <DiagramsNetEditor
+        isOpen={isDiagramsNetEditorOpen}
+        onClose={() => setIsDiagramsNetEditorOpen(false)}
+        mermaidCode={editedMermaid || getOriginalMermaid()}
+        onSave={handleSaveDiagramsNet}
+        existingXml={editedDiagramSvg}
+      />
+
       <div className="flex-1 flex overflow-hidden" ref={mainContainerRef}>
         {/* Left Sidebar - Settings */}
         <aside
@@ -321,6 +428,8 @@ function App() {
           <SystemInstructions
             value={systemInstructions}
             onChange={setSystemInstructions}
+            onPreviewClick={() => setIsPromptEditorOpen(true)}
+            hasCustomizations={hasPromptCustomizations}
           />
 
           <PersonaSelector
@@ -397,6 +506,7 @@ function App() {
                 onSend={sendMessage}
                 isLoading={isLoading}
                 disabled={!apiKey}
+                supportsImages={providerSupportsImages(provider)}
               />
             </div>
           </div>
@@ -413,7 +523,7 @@ function App() {
           <div className="flex-1 flex flex-col p-4 min-w-[300px]">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm font-medium text-text-secondary">
-                {outputType === 'ui-mockup' ? 'Live Preview' : 'Output'}
+                {outputType === 'ui-mockup' ? 'Live Preview' : outputType === 'diagram' ? 'Diagram Preview' : 'Output'}
               </div>
               {outputType === 'ui-mockup' && hasAssistantResponse && (
                 <EditorToolbar
@@ -428,6 +538,47 @@ function App() {
                   disabled={!hasAssistantResponse}
                 />
               )}
+              {outputType === 'diagram' && hasAssistantResponse && getOriginalMermaid() && (
+                <div className="flex items-center gap-2 text-xs">
+                  {/* Edit Mermaid Code button */}
+                  <button
+                    onClick={() => setIsMermaidEditorOpen(true)}
+                    className="px-3 py-1.5 rounded-md font-medium transition-all flex items-center gap-1.5 bg-dark-surface-light text-text-secondary hover:text-text-primary hover:bg-dark-border"
+                    title="Edit Mermaid code"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                    Edit Code
+                  </button>
+                  {/* Edit in diagrams.net button */}
+                  <button
+                    onClick={() => setIsDiagramsNetEditorOpen(true)}
+                    className="px-3 py-1.5 rounded-md font-medium transition-all flex items-center gap-1.5 bg-primary/20 text-primary hover:bg-primary/30"
+                    title="Open visual editor in diagrams.net"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                    </svg>
+                    Visual Edit
+                  </button>
+                  {/* Reset buttons */}
+                  {(editedMermaid || editedDiagramSvg) && (
+                    <button
+                      onClick={() => {
+                        handleClearMermaidEdits()
+                        handleClearDiagramsNetEdits()
+                      }}
+                      className="p-1.5 rounded text-warning hover:bg-warning/20 transition-colors"
+                      title="Reset all edits"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             <PreviewPane
               ref={iframeRef}
@@ -435,6 +586,7 @@ function App() {
               outputType={outputType}
               isEditMode={isEditMode}
               editedHtml={editedHtml}
+              editedMermaid={editedMermaid}
             />
           </div>
         </main>

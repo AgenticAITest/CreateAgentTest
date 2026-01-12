@@ -2,25 +2,39 @@ import { useState, useCallback } from 'react'
 import { sendChatMessage } from '../utils/apiClient'
 import { enhancePrompt } from '../utils/promptEnhancer'
 
-export function useAIChat({ apiKey, provider, model, systemInstructions, persona, outputType }) {
+export function useAIChat({
+  apiKey,
+  provider,
+  model,
+  systemInstructions,
+  persona,
+  outputType,
+  customPersonaPrompts = {},
+  customOutputTypePrompts = {}
+}) {
   const [messages, setMessages] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const sendMessage = useCallback(async (userPrompt) => {
+  const sendMessage = useCallback(async (userPrompt, images = []) => {
     if (!apiKey) {
       setError('Please enter your API key')
       return
     }
 
-    if (!userPrompt.trim()) {
+    if (!userPrompt.trim() && images.length === 0) {
       return
     }
 
     setError(null)
     setIsLoading(true)
 
-    const userMessage = { role: 'user', content: userPrompt }
+    // Include images in user message if provided
+    const userMessage = {
+      role: 'user',
+      content: userPrompt || 'Please analyze these images.',
+      ...(images.length > 0 && { images })
+    }
     setMessages((prev) => [...prev, userMessage])
 
     try {
@@ -29,6 +43,8 @@ export function useAIChat({ apiKey, provider, model, systemInstructions, persona
         persona,
         outputType,
         userPrompt,
+        customPersonaPrompts,
+        customOutputTypePrompts,
       })
 
       const allMessages = [...messages, userMessage]
@@ -50,7 +66,7 @@ export function useAIChat({ apiKey, provider, model, systemInstructions, persona
     } finally {
       setIsLoading(false)
     }
-  }, [apiKey, provider, model, systemInstructions, persona, outputType, messages])
+  }, [apiKey, provider, model, systemInstructions, persona, outputType, messages, customPersonaPrompts, customOutputTypePrompts])
 
   const clearChat = useCallback(() => {
     setMessages([])

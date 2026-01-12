@@ -16,6 +16,11 @@ export const STATIC_MODELS = {
     { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
     { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
   ],
+  cerebras: [
+    { value: 'llama-3.3-70b', label: 'Llama 3.3 70B' },
+    { value: 'llama-3.1-70b', label: 'Llama 3.1 70B' },
+    { value: 'llama-3.1-8b', label: 'Llama 3.1 8B' },
+  ],
 }
 
 // Fallback models for OpenRouter when API fetch fails

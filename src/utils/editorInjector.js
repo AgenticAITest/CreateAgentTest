@@ -12,6 +12,7 @@ export function generateEditorScript() {
   let overlay = null;
   let isDragging = false;
   let isResizing = false;
+  let isEditingText = false;
   let dragStart = { x: 0, y: 0 };
   let elementStart = { x: 0, y: 0 };
   let resizeHandle = null;
@@ -176,6 +177,7 @@ export function generateEditorScript() {
   // Handle click for selection
   function handleClick(e) {
     if (!isEditMode) return;
+    if (isEditingText) return;
 
     // Ignore clicks on overlay itself
     if (e.target.closest('.editor-overlay')) return;
@@ -195,6 +197,96 @@ export function generateEditorScript() {
     }
 
     selectElement(target);
+  }
+
+  // Handle double-click for text editing
+  function handleDoubleClick(e) {
+    if (!isEditMode || !selectedElement) return;
+    if (e.target.closest('.editor-overlay')) return;
+    if (e.target !== selectedElement && !selectedElement.contains(e.target)) return;
+
+    // Skip non-editable elements
+    const skip = ['IMG', 'VIDEO', 'IFRAME', 'CANVAS', 'SVG', 'INPUT', 'TEXTAREA', 'SELECT'];
+    if (skip.includes(selectedElement.tagName)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    startTextEdit();
+  }
+
+  // Start inline text editing
+  function startTextEdit() {
+    if (isEditingText || !selectedElement) return;
+    isEditingText = true;
+
+    // Store original text for cancel
+    selectedElement.dataset.originalText = selectedElement.textContent;
+
+    // Make element editable
+    selectedElement.contentEditable = 'true';
+    selectedElement.focus();
+
+    // Select all text
+    const range = document.createRange();
+    range.selectNodeContents(selectedElement);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    // Visual feedback - green outline
+    selectedElement.style.outline = '2px solid #22c55e';
+    selectedElement.style.outlineOffset = '2px';
+
+    // Hide overlay while editing
+    if (overlay) overlay.style.display = 'none';
+
+    selectedElement.addEventListener('keydown', handleTextKeydown);
+    selectedElement.addEventListener('blur', handleTextBlur);
+    notifyParent(IFRAME_MESSAGES.TEXT_EDIT_START);
+  }
+
+  // Handle keyboard during text edit
+  function handleTextKeydown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      finishTextEdit(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      finishTextEdit(false);
+    }
+  }
+
+  // Handle blur (clicking outside)
+  function handleTextBlur() {
+    setTimeout(() => {
+      if (isEditingText) finishTextEdit(true);
+    }, 100);
+  }
+
+  // Finish text editing
+  function finishTextEdit(save) {
+    if (!isEditingText || !selectedElement) return;
+    isEditingText = false;
+
+    selectedElement.removeEventListener('keydown', handleTextKeydown);
+    selectedElement.removeEventListener('blur', handleTextBlur);
+    selectedElement.contentEditable = 'false';
+    selectedElement.style.outline = '';
+    selectedElement.style.outlineOffset = '';
+
+    if (!save && selectedElement.dataset.originalText !== undefined) {
+      selectedElement.textContent = selectedElement.dataset.originalText;
+    }
+    delete selectedElement.dataset.originalText;
+
+    if (overlay) overlay.style.display = '';
+    updateOverlay();
+    notifyParent(IFRAME_MESSAGES.TEXT_EDIT_END);
+
+    if (save) {
+      notifyParent(IFRAME_MESSAGES.HTML_UPDATED, { html: getCleanHtml() });
+      notifyParent(IFRAME_MESSAGES.ELEMENT_SELECTED, { element: getElementInfo(selectedElement) });
+    }
   }
 
   // Initialize drag
@@ -325,6 +417,10 @@ export function generateEditorScript() {
       el.classList.remove('editor-selected', 'editor-highlight');
     });
 
+    // Remove text editing artifacts
+    clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+    clone.querySelectorAll('[data-original-text]').forEach(el => el.removeAttribute('data-original-text'));
+
     return '<!DOCTYPE html>' + clone.outerHTML;
   }
 
@@ -407,6 +503,7 @@ export function generateEditorScript() {
 
   // Initialize
   document.addEventListener('click', handleClick, true);
+  document.addEventListener('dblclick', handleDoubleClick, true);
   document.addEventListener('mousemove', handleMouseMove);
   document.addEventListener('mouseup', handleMouseUp);
   document.addEventListener('mouseover', handleMouseOver);

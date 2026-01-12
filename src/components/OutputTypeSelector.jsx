@@ -3,6 +3,7 @@ const OUTPUT_TYPES = [
   { value: 'architecture', label: 'Architecture' },
   { value: 'business-analysis', label: 'Business Analysis' },
   { value: 'ui-mockup', label: 'UI Mockup' },
+  { value: 'diagram', label: 'Diagram (Mermaid)' },
   { value: 'documentation', label: 'Documentation' },
 ]
 
@@ -26,6 +27,11 @@ export function OutputTypeSelector({ value, onChange }) {
       {value === 'ui-mockup' && (
         <p className="text-xs text-success mt-1">
           Live preview enabled - HTML will render below
+        </p>
+      )}
+      {value === 'diagram' && (
+        <p className="text-xs text-success mt-1">
+          Mermaid diagram preview enabled
         </p>
       )}
     </div>

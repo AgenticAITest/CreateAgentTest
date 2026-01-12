@@ -32,6 +32,21 @@ export function ChatHistory({ messages, onClear }) {
             <div className={`text-xs mb-1 ${msg.role === 'user' ? 'text-primary-light' : 'text-text-muted'}`}>
               {msg.role === 'user' ? 'You' : 'Assistant'}
             </div>
+            {/* Display images if present */}
+            {msg.images && msg.images.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {msg.images.map((img, imgIdx) => (
+                  <img
+                    key={imgIdx}
+                    src={img.preview}
+                    alt={img.fileName || `Image ${imgIdx + 1}`}
+                    className="h-20 w-20 object-cover rounded-md border border-white/20 cursor-pointer hover:opacity-80 transition-opacity"
+                    onClick={() => window.open(img.preview, '_blank')}
+                    title={`${img.fileName} - Click to view full size`}
+                  />
+                ))}
+              </div>
+            )}
             <div className="whitespace-pre-wrap break-words">
               {msg.content}
             </div>
