@@ -24,7 +24,7 @@ import { MermaidEditor } from './components/MermaidEditor'
 import { DiagramsNetEditor } from './components/DiagramsNetEditor'
 import { downloadHtmlFile, sanitizeFilename } from './utils/downloadUtils'
 import { providerSupportsImages } from './utils/apiClient'
-import { extractMermaidFromResponse } from './utils/promptEnhancer'
+import { extractMermaidFromResponse, extractHtmlFromResponse } from './utils/promptEnhancer'
 
 function App() {
   // Settings modal state
@@ -276,6 +276,28 @@ function App() {
     return null
   }, [messages])
 
+  // Get original HTML from messages
+  const getOriginalHtml = useCallback(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg.role === 'assistant') {
+        const html = extractHtmlFromResponse(msg.content)
+        if (html) return html
+      }
+    }
+    return null
+  }, [messages])
+
+  // Determine detected content type for toolbar display
+  const hasMermaidContent = !!getOriginalMermaid()
+  const hasHtmlContent = !!getOriginalHtml()
+
+  // Decide which toolbar to show: prefer outputType selection, fallback to detected
+  const showMermaidToolbar = (outputType === 'diagram' && hasMermaidContent) ||
+                             (outputType === 'ui-mockup' && !hasHtmlContent && hasMermaidContent)
+  const showHtmlToolbar = (outputType === 'ui-mockup' && hasHtmlContent) ||
+                          (outputType === 'diagram' && !hasMermaidContent && hasHtmlContent)
+
   // Handle save edited Mermaid
   const handleSaveMermaid = (code) => {
     setEditedMermaid(code)
@@ -523,9 +545,9 @@ function App() {
           <div className="flex-1 flex flex-col p-4 min-w-[300px]">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm font-medium text-text-secondary">
-                {outputType === 'ui-mockup' ? 'Live Preview' : outputType === 'diagram' ? 'Diagram Preview' : 'Output'}
+                {showMermaidToolbar ? 'Diagram Preview' : showHtmlToolbar ? 'Live Preview' : 'Output'}
               </div>
-              {outputType === 'ui-mockup' && hasAssistantResponse && (
+              {showHtmlToolbar && hasAssistantResponse && (
                 <EditorToolbar
                   isEditMode={isEditMode}
                   onToggleEditMode={toggleEditMode}
@@ -538,7 +560,7 @@ function App() {
                   disabled={!hasAssistantResponse}
                 />
               )}
-              {outputType === 'diagram' && hasAssistantResponse && getOriginalMermaid() && (
+              {showMermaidToolbar && hasAssistantResponse && (
                 <div className="flex items-center gap-2 text-xs">
                   {/* Edit Mermaid Code button */}
                   <button

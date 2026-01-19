@@ -275,10 +275,8 @@ export const PreviewPane = forwardRef(function PreviewPane({
   const zoomOut = () => setZoom(z => Math.max(25, z - 25))
   const zoomReset = () => setZoom(100)
 
-  // Extract HTML from messages (for ui-mockup)
+  // Extract HTML from messages (try regardless of outputType for flexibility)
   const originalHtml = useMemo(() => {
-    if (outputType !== 'ui-mockup') return null
-
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]
       if (msg.role === 'assistant') {
@@ -287,12 +285,10 @@ export const PreviewPane = forwardRef(function PreviewPane({
       }
     }
     return null
-  }, [messages, outputType])
+  }, [messages])
 
-  // Extract Mermaid from messages (for diagram)
+  // Extract Mermaid from messages (try regardless of outputType for flexibility)
   const originalMermaid = useMemo(() => {
-    if (outputType !== 'diagram') return null
-
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]
       if (msg.role === 'assistant') {
@@ -301,7 +297,18 @@ export const PreviewPane = forwardRef(function PreviewPane({
       }
     }
     return null
-  }, [messages, outputType])
+  }, [messages])
+
+  // Determine actual content type based on what was found in the response
+  // Prefer outputType selection, but fall back to detected content
+  const detectedType = useMemo(() => {
+    if (outputType === 'ui-mockup' && originalHtml) return 'ui-mockup'
+    if (outputType === 'diagram' && originalMermaid) return 'diagram'
+    // Fallback: if selected type has no content, check if other type does
+    if (outputType === 'ui-mockup' && !originalHtml && originalMermaid) return 'diagram'
+    if (outputType === 'diagram' && !originalMermaid && originalHtml) return 'ui-mockup'
+    return outputType
+  }, [outputType, originalHtml, originalMermaid])
 
   // Use edited content if available
   const baseHtml = editedHtml || originalHtml
@@ -309,22 +316,22 @@ export const PreviewPane = forwardRef(function PreviewPane({
 
   // Inject editor script when in edit mode (HTML only)
   const previewHtml = useMemo(() => {
-    if (outputType === 'ui-mockup') {
+    if (detectedType === 'ui-mockup') {
       if (!baseHtml) return null
       if (isEditMode) {
         return injectEditorScript(baseHtml)
       }
       return baseHtml
     }
-    if (outputType === 'diagram') {
+    if (detectedType === 'diagram') {
       if (!baseMermaid) return null
       return createMermaidHtml(baseMermaid, zoom)
     }
     return null
-  }, [baseHtml, baseMermaid, isEditMode, outputType, zoom])
+  }, [baseHtml, baseMermaid, isEditMode, detectedType, zoom])
 
-  // Show placeholder for non-preview output types
-  if (outputType !== 'ui-mockup' && outputType !== 'diagram') {
+  // Show placeholder for non-preview output types (but allow if content was detected)
+  if (outputType !== 'ui-mockup' && outputType !== 'diagram' && !originalHtml && !originalMermaid) {
     return (
       <div className="flex-1 flex items-center justify-center rounded-lg text-sm border" style={{ backgroundColor: '#1a1425', borderColor: '#3d2e5a', color: '#94a3b8' }}>
         Select "UI Mockup" or "Diagram" output type to enable live preview
@@ -339,22 +346,22 @@ export const PreviewPane = forwardRef(function PreviewPane({
         <div className="text-center">
           <p>Live Preview</p>
           <p className="text-xs mt-1">
-            {outputType === 'diagram' ? 'Generated diagram will appear here' : 'Generated HTML will appear here'}
+            {detectedType === 'diagram' ? 'Generated diagram will appear here' : 'Generated HTML will appear here'}
           </p>
         </div>
       </div>
     )
   }
 
-  const isModified = outputType === 'ui-mockup' ? !!editedHtml : !!editedMermaid
-  const previewLabel = outputType === 'diagram' ? 'Diagram Preview' : 'Live Preview'
+  const isModified = detectedType === 'ui-mockup' ? !!editedHtml : !!editedMermaid
+  const previewLabel = detectedType === 'diagram' ? 'Diagram Preview' : 'Live Preview'
 
   return (
     <div className="flex-1 flex flex-col bg-white rounded-lg overflow-hidden border" style={{ borderColor: '#3d2e5a' }}>
       <div className="px-3 py-1 text-xs flex items-center justify-between" style={{ backgroundColor: '#251d35', color: '#cbd5e1' }}>
         <div className="flex items-center gap-2">
           <span>{previewLabel}</span>
-          {isEditMode && outputType === 'ui-mockup' && (
+          {isEditMode && detectedType === 'ui-mockup' && (
             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ backgroundColor: '#7c3aed', color: 'white' }}>
               EDIT MODE
             </span>
@@ -367,7 +374,7 @@ export const PreviewPane = forwardRef(function PreviewPane({
         </div>
         <div className="flex items-center gap-2">
           {/* Zoom controls for diagram */}
-          {outputType === 'diagram' && baseMermaid && (
+          {detectedType === 'diagram' && baseMermaid && (
             <div className="flex items-center gap-1 mr-2">
               <button
                 onClick={zoomOut}
@@ -412,7 +419,7 @@ export const PreviewPane = forwardRef(function PreviewPane({
       <iframe
         ref={ref}
         srcDoc={previewHtml}
-        title={outputType === 'diagram' ? 'Diagram Preview' : 'UI Preview'}
+        title={detectedType === 'diagram' ? 'Diagram Preview' : 'UI Preview'}
         className="flex-1 w-full border-0"
         sandbox="allow-scripts allow-same-origin"
       />
